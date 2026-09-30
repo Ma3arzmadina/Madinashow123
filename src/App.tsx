@@ -13,6 +13,7 @@ import { TruckCard } from './components/TruckCard';
 import { TruckDetailModal } from './components/TruckDetailModal';
 import { AdminPortal } from './components/AdminPortal';
 import { AdminPinModal } from './components/AdminPinModal';
+import { DeleteModal } from './components/DeleteModal';
 import { ContactSection } from './components/ContactSection';
 import { Footer } from './components/Footer';
 import { LanguageModal } from './components/LanguageModal';
@@ -27,6 +28,10 @@ const MainApp: React.FC = () => {
   const [selectedTruck, setSelectedTruck] = useState<Truck | null>(null);
   const [isAdminPortalOpen, setIsAdminPortalOpen] = useState(false);
   const [editingTruck, setEditingTruck] = useState<Truck | null>(null);
+
+  // Custom Delete Modal State (replaces blocked window.confirm)
+  const [truckToDelete, setTruckToDelete] = useState<Truck | null>(null);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
 
   const inventoryRef = useRef<HTMLDivElement>(null);
 
@@ -79,7 +84,6 @@ const MainApp: React.FC = () => {
       }
 
       // Attach real-time Firestore listener
-      // If collection is empty because the user deleted trucks, it stays empty!
       unsubscribe = onSnapshot(
         collection(db, 'trucks'),
         (snapshot) => {
@@ -172,20 +176,30 @@ const MainApp: React.FC = () => {
     setIsAdminPortalOpen(true);
   };
 
-  // Permanent Delete
-  const handleDeleteTruck = async (truck: Truck) => {
+  // Open custom In-App Delete Modal (No window.confirm!)
+  const handleRequestDeleteTruck = (truck: Truck) => {
     if (!hasFullPermission) {
       openPinModal();
       return;
     }
-    if (!confirm(t.confirmDeleteDesc)) return;
+    setTruckToDelete(truck);
+    setIsDeleteModalOpen(true);
+  };
 
+  // Perform permanent deletion in Firestore & optimistic state update
+  const handleExecuteDelete = async (truck: Truck) => {
     try {
-      await deleteDoc(doc(db, 'trucks', truck.id));
+      // 1. Optimistic removal from state immediately
+      setTrucks((prev) => prev.filter((t) => t.id !== truck.id));
+
       if (selectedTruck?.id === truck.id) {
         setSelectedTruck(null);
       }
+
+      // 2. Permanent deletion in Cloud Firestore
+      await deleteDoc(doc(db, 'trucks', truck.id));
     } catch (err) {
+      console.error('Delete error:', err);
       handleFirestoreError(err, OperationType.DELETE, `trucks/${truck.id}`);
     }
   };
@@ -200,6 +214,17 @@ const MainApp: React.FC = () => {
         onSuccess={() => {
           setIsAdminPortalOpen(true);
         }}
+      />
+
+      {/* In-App Delete Confirmation Modal (Guaranteed to work without window.confirm) */}
+      <DeleteModal
+        truck={truckToDelete}
+        isOpen={isDeleteModalOpen}
+        onClose={() => {
+          setIsDeleteModalOpen(false);
+          setTruckToDelete(null);
+        }}
+        onConfirm={handleExecuteDelete}
       />
 
       {/* Main Navbar */}
@@ -278,7 +303,7 @@ const MainApp: React.FC = () => {
                 truck={truck}
                 onSelect={setSelectedTruck}
                 onEdit={handleEditTruck}
-                onDelete={handleDeleteTruck}
+                onDelete={handleRequestDeleteTruck}
               />
             ))}
           </div>
@@ -361,7 +386,7 @@ const MainApp: React.FC = () => {
         truck={selectedTruck}
         onClose={() => setSelectedTruck(null)}
         onEdit={handleEditTruck}
-        onDelete={handleDeleteTruck}
+        onDelete={handleRequestDeleteTruck}
       />
 
       {/* Admin Management & Inventory Dashboard */}
@@ -375,6 +400,10 @@ const MainApp: React.FC = () => {
         editingTruck={editingTruck}
         onDoneEditing={() => setEditingTruck(null)}
         onTrucksChanged={() => {}}
+        onDeleteTruck={(id) => {
+          setTrucks((prev) => prev.filter((t) => t.id !== id));
+          if (selectedTruck?.id === id) setSelectedTruck(null);
+        }}
       />
     </div>
   );

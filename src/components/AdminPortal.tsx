@@ -48,6 +48,7 @@ interface AdminPortalProps {
   editingTruck: Truck | null;
   onDoneEditing: () => void;
   onTrucksChanged: () => void;
+  onDeleteTruck: (truckId: string) => void;
 }
 
 export const AdminPortal: React.FC<AdminPortalProps> = ({
@@ -57,6 +58,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   editingTruck,
   onDoneEditing,
   onTrucksChanged,
+  onDeleteTruck,
 }) => {
   const { t } = useLanguage();
   const { user, hasFullPermission, lockAdmin, adminEmail, isOwner } = useAuth();
@@ -66,6 +68,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const [uploadingImage, setUploadingImage] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const [confirmDeleteTruckId, setConfirmDeleteTruckId] = useState<string | null>(null);
+  const [confirmRevokeAdminId, setConfirmRevokeAdminId] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -302,14 +307,18 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   };
 
   // Permanent Delete Truck from Firestore
-  const handleDeleteTruck = async (truckId: string) => {
+  const executeDeleteTruck = async (truckId: string) => {
     if (!hasFullPermission) {
-      alert(t.onlyAdminsCanPost);
+      setErrorMessage(t.onlyAdminsCanPost);
       return;
     }
-    if (!confirm('Are you sure you want to permanently delete this truck from the showroom?')) return;
 
     setLoading(true);
+    setConfirmDeleteTruckId(null);
+
+    // Instant optimistic removal from UI
+    onDeleteTruck(truckId);
+
     try {
       await deleteDoc(doc(db, 'trucks', truckId));
       setSuccessMessage('Truck permanently removed from showroom.');
@@ -325,10 +334,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   // Seed sample database
   const handleSeedDatabase = async () => {
     if (!hasFullPermission) {
-      alert(t.onlyAdminsCanPost);
+      setErrorMessage(t.onlyAdminsCanPost);
       return;
     }
-    if (!confirm('Load sample dealership trucks into Firestore?')) return;
 
     setLoading(true);
     try {
@@ -378,10 +386,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     }
   };
 
-  const handleRevokeAdmin = async (adminId: string) => {
-    if (!confirm('Revoke permissions for this user?')) return;
-
+  const executeRevokeAdmin = async (adminId: string) => {
     setLoading(true);
+    setConfirmRevokeAdminId(null);
     try {
       await deleteDoc(doc(db, 'admins', adminId));
       setSuccessMessage('Admin access revoked.');
@@ -654,13 +661,33 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                           <span>{t.editTruck}</span>
                         </button>
 
-                        <button
-                          onClick={() => handleDeleteTruck(trk.id)}
-                          className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-600 hover:text-white text-xs font-bold text-rose-400 border border-rose-500/30 transition"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          <span>{t.delete}</span>
-                        </button>
+                        {confirmDeleteTruckId === trk.id ? (
+                          <div className="flex items-center gap-1.5 animate-in fade-in">
+                            <button
+                              type="button"
+                              onClick={() => executeDeleteTruck(trk.id)}
+                              className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black text-xs shadow-md transition"
+                            >
+                              Confirm Delete
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteTruckId(null)}
+                              className="px-2 py-1.5 rounded-xl bg-[#0B1528] text-slate-400 hover:text-white text-xs"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteTruckId(trk.id)}
+                            className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-600 hover:text-white text-xs font-bold text-rose-400 border border-rose-500/30 transition"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>{t.delete}</span>
+                          </button>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -1184,12 +1211,32 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                       </div>
                     </div>
 
-                    <button
-                      onClick={() => handleRevokeAdmin(adm.id)}
-                      className="px-3.5 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-600 text-rose-400 hover:text-white text-xs font-bold border border-rose-500/30 transition"
-                    >
-                      {t.revokeAccess}
-                    </button>
+                    {confirmRevokeAdminId === adm.id ? (
+                      <div className="flex items-center gap-1.5 animate-in fade-in">
+                        <button
+                          type="button"
+                          onClick={() => executeRevokeAdmin(adm.id)}
+                          className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black text-xs shadow-md transition"
+                        >
+                          Confirm Revoke
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmRevokeAdminId(null)}
+                          className="px-2 py-1.5 rounded-xl bg-[#0B1528] text-slate-400 hover:text-white text-xs"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmRevokeAdminId(adm.id)}
+                        className="px-3.5 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-600 text-rose-400 hover:text-white text-xs font-bold border border-rose-500/30 transition"
+                      >
+                        {t.revokeAccess}
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
