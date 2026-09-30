@@ -29,6 +29,7 @@ import {
   AlertTriangle,
   Sparkles,
   Info,
+  Mail,
 } from 'lucide-react';
 
 interface AdminPortalProps {
@@ -49,7 +50,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   onTrucksChanged,
 }) => {
   const { t } = useLanguage();
-  const { user, hasFullPermission, isPinUnlocked, lockAdmin } = useAuth();
+  const { user, hasFullPermission, isPinUnlocked, lockAdmin, adminEmail, isOwner } = useAuth();
 
   const [activeTab, setActiveTab] = useState<'inventory' | 'create' | 'permissions'>('inventory');
   const [loading, setLoading] = useState(false);
@@ -210,8 +211,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         images: formData.images.length > 0 ? formData.images : ['https://images.unsplash.com/photo-1601584115197-04ecc0da31d7?auto=format&fit=crop&w=1200&q=80'],
         status: formData.status,
         featured: formData.featured,
-        createdBy: user?.uid || 'madina_admin_pin',
-        createdByEmail: user?.email || 'admin@madinashop.com',
+        createdBy: user?.uid || adminEmail || 'madina_admin',
+        createdByEmail: user?.email || adminEmail || 'admin@madinashop.com',
       };
 
       await setDoc(doc(db, 'trucks', truckId), payload, { merge: true });
@@ -261,8 +262,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         const truckId = `truck_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
         await setDoc(doc(db, 'trucks', truckId), {
           ...truck,
-          createdBy: user?.uid || 'madina_admin_pin',
-          createdByEmail: user?.email || BOOTSTRAP_OWNER_EMAIL,
+          createdBy: user?.uid || adminEmail || 'madina_admin',
+          createdByEmail: user?.email || adminEmail || BOOTSTRAP_OWNER_EMAIL,
         });
       }
       setSuccessMessage(t.seedingDone);
@@ -281,16 +282,17 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
     setLoading(true);
     try {
-      const sanitizedId = newAdminEmail.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
+      const cleanEmail = newAdminEmail.trim().toLowerCase();
+      const sanitizedId = cleanEmail.replace(/[^a-zA-Z0-9_-]/g, '_');
       const payload: Omit<AdminUser, 'id'> = {
-        email: newAdminEmail.trim().toLowerCase(),
+        email: cleanEmail,
         role: newAdminRole,
         plateAccess: newAdminPlateNote.trim(),
-        addedBy: user?.email || 'Dealership PIN Master',
+        addedBy: adminEmail || user?.email || 'Owner',
         createdAt: new Date().toISOString(),
       };
       await setDoc(doc(db, 'admins', sanitizedId), payload);
-      setSuccessMessage(`Admin role granted to ${newAdminEmail}`);
+      setSuccessMessage(`Permission granted! ${cleanEmail} can now log in using the admin PIN.`);
       setNewAdminEmail('');
       loadAdmins();
     } catch (err) {
@@ -332,11 +334,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   {t.adminDashboard}
                 </h3>
                 <span className="px-3 py-0.5 rounded-full text-[10px] font-mono bg-orange-500/20 text-orange-400 font-black border border-orange-500/40">
-                  {isPinUnlocked ? 'PIN UNLOCKED (19madina19)' : 'SUPER ADMIN'}
+                  {isOwner ? 'SUPER ADMIN (OWNER)' : 'AUTHORIZED ADMIN'}
                 </span>
               </div>
               <p className="text-xs text-slate-300">
-                {user?.email || 'Authorized Dealership Admin'} • {t.fullPermission}
+                {adminEmail || user?.email || 'Authorized Dealership Admin'} • {t.fullPermission}
               </p>
             </div>
           </div>
@@ -351,7 +353,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               title="Lock Admin Session"
             >
               <Lock className="w-3.5 h-3.5" />
-              <span>Lock PIN</span>
+              <span>Lock Session</span>
             </button>
 
             <button
@@ -401,7 +403,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             }`}
           >
             <Shield className="w-4 h-4" />
-            <span>{t.managePermissions}</span>
+            <span>{t.managePermissions} ({adminsList.length + 1})</span>
           </button>
         </div>
 
@@ -899,100 +901,109 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             </form>
           )}
 
-          {/* TAB 3: PLATES & PERMISSIONS */}
+          {/* TAB 3: PLATES & PERMISSIONS (GRANT ACCESS BY EMAIL) */}
           {activeTab === 'permissions' && (
             <div className="space-y-6">
-              <div className="p-4 rounded-3xl bg-[#030712] border border-[#1A2F4C] flex items-start gap-3">
+              <div className="p-5 rounded-3xl bg-[#030712] border border-[#1A2F4C] flex items-start gap-3.5">
                 <Info className="w-5 h-5 text-orange-400 shrink-0 mt-0.5" />
                 <div className="text-xs text-slate-200 leading-relaxed">
-                  <span className="font-black text-white block mb-0.5">
-                    {t.authorizedPlatesAndAdmins}
+                  <span className="font-black text-white text-sm block mb-1">
+                    Dealership Admin Permissions Manager
                   </span>
-                  Full permission holders have rights to create listings, update pricing, edit details, and remove trucks from the public showroom securely using Dealership PIN: <span className="font-mono text-orange-400 font-black">19madina19</span>.
+                  Add any person's email address below to grant them permission. Once their email is added, they can sign in by entering their email address and the secret dealership PIN.
                 </div>
               </div>
 
-              {/* Grant New Admin Form */}
+              {/* Grant New Admin Form: Write email and grant permission */}
               <form
                 onSubmit={handleAddAdmin}
-                className="p-5 rounded-3xl bg-[#030712] border border-[#1A2F4C] space-y-4"
+                className="p-6 rounded-3xl bg-[#030712] border border-orange-500/40 space-y-4 shadow-xl shadow-orange-500/5"
               >
-                <h4 className="text-sm font-black text-white flex items-center gap-2">
-                  <UserPlus className="w-4 h-4 text-orange-400" />
-                  <span>{t.addAdmin}</span>
-                </h4>
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-black text-white flex items-center gap-2">
+                    <UserPlus className="w-4 h-4 text-orange-400" />
+                    <span>Authorize New Admin Email</span>
+                  </h4>
+                  <span className="text-[11px] text-orange-400 font-bold">
+                    Email + PIN Required for Access
+                  </span>
+                </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
                   <div className="sm:col-span-1">
-                    <label className="block text-xs font-bold text-slate-300 mb-1">
-                      {t.email} *
+                    <label className="block text-xs font-bold text-slate-300 mb-1.5 flex items-center gap-1.5">
+                      <Mail className="w-3.5 h-3.5 text-orange-400" />
+                      <span>Email Address *</span>
                     </label>
                     <input
                       type="email"
                       required
                       value={newAdminEmail}
                       onChange={(e) => setNewAdminEmail(e.target.value)}
-                      placeholder="admin@example.com"
-                      className="w-full px-3.5 py-2 bg-[#070E1C] border border-[#1E3352] rounded-xl text-white text-xs focus:ring-1 focus:ring-orange-500 focus:outline-none"
+                      placeholder="e.g. manager@dealership.com"
+                      className="w-full px-4 py-2.5 bg-[#070E1C] border border-[#1E3352] rounded-xl text-white text-xs focus:ring-2 focus:ring-orange-500 focus:outline-none font-medium"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-slate-300 mb-1">
-                      {t.role} *
+                    <label className="block text-xs font-bold text-slate-300 mb-1.5 flex items-center gap-1.5">
+                      <Shield className="w-3.5 h-3.5 text-orange-400" />
+                      <span>Role & Permission Level *</span>
                     </label>
                     <select
                       value={newAdminRole}
                       onChange={(e) => setNewAdminRole(e.target.value as any)}
-                      className="w-full px-3.5 py-2 bg-[#070E1C] border border-[#1E3352] rounded-xl text-white text-xs focus:ring-1 focus:ring-orange-500 focus:outline-none"
+                      className="w-full px-4 py-2.5 bg-[#070E1C] border border-[#1E3352] rounded-xl text-white text-xs focus:ring-2 focus:ring-orange-500 focus:outline-none font-bold"
                     >
-                      <option value="admin">{t.admin} (Full Listing & Remove)</option>
-                      <option value="manager">{t.manager} (Showroom Listings)</option>
-                      <option value="owner">{t.superAdmin} (Owner)</option>
+                      <option value="admin">{t.admin} (Add, Edit & Delete Listings)</option>
+                      <option value="manager">{t.manager} (Manage Listings & Status)</option>
+                      <option value="owner">{t.superAdmin} (Full Owner Privileges)</option>
                     </select>
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-slate-300 mb-1">
+                    <label className="block text-xs font-bold text-slate-300 mb-1.5">
                       {t.plateAccessNote}
                     </label>
                     <input
                       type="text"
                       value={newAdminPlateNote}
                       onChange={(e) => setNewAdminPlateNote(e.target.value)}
-                      placeholder="Plate Full Permission"
-                      className="w-full px-3.5 py-2 bg-[#070E1C] border border-[#1E3352] rounded-xl text-white text-xs focus:ring-1 focus:ring-orange-500 focus:outline-none"
+                      placeholder="e.g. Erbil Yard Plate Inspector"
+                      className="w-full px-4 py-2.5 bg-[#070E1C] border border-[#1E3352] rounded-xl text-white text-xs focus:ring-2 focus:ring-orange-500 focus:outline-none"
                     />
                   </div>
                 </div>
 
-                <div className="flex justify-end">
+                <div className="flex justify-end pt-1">
                   <button
                     type="submit"
                     disabled={loading}
-                    className="px-5 py-2 bg-orange-500 hover:bg-orange-600 text-black font-black text-xs rounded-xl transition"
+                    className="px-6 py-2.5 bg-orange-500 hover:bg-orange-600 text-black font-black text-xs rounded-xl transition shadow-md shadow-orange-500/20"
                   >
-                    {loading ? t.loading : t.addAdmin}
+                    {loading ? t.loading : 'Grant Admin Permission'}
                   </button>
                 </div>
               </form>
 
-              {/* List of current authorized admins */}
+              {/* List of Authorized Admins */}
               <div className="space-y-3">
-                <h5 className="text-xs font-black text-white uppercase tracking-wider">
-                  Configured Dealership Administrators
+                <h5 className="text-xs font-black text-white uppercase tracking-wider flex items-center gap-2">
+                  <UserCheck className="w-4 h-4 text-orange-400" />
+                  <span>Authorized Administrators in Database ({adminsList.length + 1})</span>
                 </h5>
 
+                {/* Primary Bootstrap Owner card */}
                 <div className="flex items-center justify-between p-4 bg-[#030712] border border-orange-500/40 rounded-2xl">
                   <div className="flex items-center gap-3">
-                    <div className="p-2 rounded-xl bg-orange-500/15 text-orange-400">
+                    <div className="p-2.5 rounded-xl bg-orange-500/15 text-orange-400">
                       <ShieldCheck className="w-5 h-5" />
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
-                        <span className="font-bold text-white text-sm font-mono">Master PIN: 19madina19</span>
-                        <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase bg-orange-500 text-black">
-                          Active Key
+                        <span className="font-bold text-white text-sm font-mono">{BOOTSTRAP_OWNER_EMAIL}</span>
+                        <span className="px-2.5 py-0.5 rounded text-[10px] font-black uppercase bg-orange-500 text-black">
+                          Primary Owner
                         </span>
                       </div>
                       <span className="text-xs text-slate-300 font-medium">
@@ -1000,34 +1011,34 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                       </span>
                     </div>
                   </div>
-                  <span className="text-xs text-orange-400 font-black font-mono">Active</span>
+                  <span className="text-xs text-orange-400 font-black font-mono">Owner Access</span>
                 </div>
 
                 {adminsList.map((adm) => (
                   <div
                     key={adm.id}
-                    className="flex items-center justify-between p-4 bg-[#030712] border border-[#1A2F4C] rounded-2xl"
+                    className="flex items-center justify-between p-4 bg-[#030712] border border-[#1A2F4C] rounded-2xl hover:border-orange-500/30 transition"
                   >
                     <div className="flex items-center gap-3">
-                      <div className="p-2 rounded-xl bg-[#0B1528] text-slate-300">
-                        <UserCheck className="w-5 h-5" />
+                      <div className="p-2.5 rounded-xl bg-[#0B1528] text-slate-300 border border-[#1E3352]">
+                        <UserCheck className="w-5 h-5 text-orange-400" />
                       </div>
                       <div>
                         <div className="flex items-center gap-2">
                           <span className="font-bold text-white text-sm font-mono">{adm.email}</span>
-                          <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-blue-500/20 text-blue-400 uppercase font-bold">
+                          <span className="px-2.5 py-0.5 rounded text-[10px] font-mono bg-blue-500/20 text-blue-400 uppercase font-black">
                             {adm.role}
                           </span>
                         </div>
                         <span className="text-xs text-slate-400">
-                          {adm.plateAccess || 'Listing Administrator'}
+                          {adm.plateAccess || 'Authorized Admin'}
                         </span>
                       </div>
                     </div>
 
                     <button
                       onClick={() => handleRevokeAdmin(adm.id)}
-                      className="px-3 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-600 text-rose-400 hover:text-white text-xs font-semibold border border-rose-500/30 transition"
+                      className="px-3.5 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-600 text-rose-400 hover:text-white text-xs font-bold border border-rose-500/30 transition"
                     >
                       {t.revokeAccess}
                     </button>

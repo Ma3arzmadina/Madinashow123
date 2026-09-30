@@ -27,7 +27,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   inventoryCount,
 }) => {
   const { language, setLanguage, openLanguageModal, t } = useLanguage();
-  const { hasFullPermission, isPinUnlocked, openPinModal, lockAdmin } = useAuth();
+  const { hasFullPermission, isPinUnlocked, openPinModal, lockAdmin, adminEmail } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const handleAdminClick = () => {
@@ -151,7 +151,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             </a>
           </div>
 
-          {/* Right Controls: Language & Admin PIN */}
+          {/* Right Controls: Language & Admin */}
           <div className="hidden md:flex items-center gap-3">
             {/* Language Switcher */}
             <button
@@ -163,7 +163,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span>{currentLangLabel}</span>
             </button>
 
-            {/* Admin PIN Unlock Button */}
+            {/* Admin State Button */}
             {hasFullPermission ? (
               <div className="flex items-center gap-2">
                 <button
@@ -196,7 +196,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-[#0B1528] hover:bg-[#11213C] border border-[#1B2F4E] hover:border-orange-500/50 text-xs font-bold text-white hover:text-orange-400 transition shadow-sm"
               >
                 <Lock className="w-4 h-4 text-orange-400" />
-                <span>Admin PIN</span>
+                <span>{t.adminLogin}</span>
               </button>
             )}
           </div>
@@ -286,7 +286,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 className="w-full flex items-center justify-center gap-2 p-2.5 rounded-xl bg-[#0B1528] border border-orange-500/40 text-orange-400 text-xs font-black"
               >
                 <Lock className="w-4 h-4" />
-                <span>Enter Admin PIN (19madina19)</span>
+                <span>{t.adminLogin}</span>
               </button>
             )}
           </div>

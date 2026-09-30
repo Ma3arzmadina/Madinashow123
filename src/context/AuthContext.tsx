@@ -5,7 +5,7 @@ import {
   signOut as firebaseSignOut,
   onAuthStateChanged,
 } from 'firebase/auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, setDoc, query, where } from 'firebase/firestore';
 import { auth, db, googleProvider, BOOTSTRAP_OWNER_EMAIL } from '../firebase/config';
 import { AdminUser } from '../types';
 
@@ -19,8 +19,9 @@ interface AuthContextType {
   isManager: boolean;
   hasFullPermission: boolean;
   isPinUnlocked: boolean;
+  adminEmail: string | null;
   adminProfile: AdminUser | null;
-  unlockWithPin: (pin: string) => boolean;
+  unlockWithEmailAndPin: (email: string, pin: string) => Promise<{ success: boolean; error?: string }>;
   lockAdmin: () => void;
   signInWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
@@ -37,13 +38,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [adminProfile, setAdminProfile] = useState<AdminUser | null>(null);
   const [isPinModalOpen, setIsPinModalOpen] = useState<boolean>(false);
 
-  // Check if PIN was previously unlocked in this browser session
+  const [adminEmail, setAdminEmail] = useState<string | null>(() => {
+    return localStorage.getItem('madina_admin_email');
+  });
+
   const [isPinUnlocked, setIsPinUnlocked] = useState<boolean>(() => {
-    return localStorage.getItem('madina_admin_pin_auth') === 'true';
+    return localStorage.getItem('madina_admin_pin_auth') === 'true' && Boolean(localStorage.getItem('madina_admin_email'));
   });
 
   const isOwner = Boolean(
-    isPinUnlocked || (user && user.email?.toLowerCase() === BOOTSTRAP_OWNER_EMAIL.toLowerCase()) || adminProfile?.role === 'owner'
+    (adminEmail && adminEmail.toLowerCase() === BOOTSTRAP_OWNER_EMAIL.toLowerCase()) ||
+    (user && user.email?.toLowerCase() === BOOTSTRAP_OWNER_EMAIL.toLowerCase()) ||
+    adminProfile?.role === 'owner'
   );
 
   const isAdmin = Boolean(
@@ -56,39 +62,53 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const hasFullPermission = isPinUnlocked || isOwner || isAdmin;
 
+  // Initialize bootstrap owner in Firestore if needed
+  useEffect(() => {
+    const bootstrapCheck = async () => {
+      try {
+        const ownerDocId = BOOTSTRAP_OWNER_EMAIL.replace(/[^a-zA-Z0-9_-]/g, '_');
+        const ownerRef = doc(db, 'admins', ownerDocId);
+        const snap = await getDoc(ownerRef);
+        if (!snap.exists()) {
+          await setDoc(ownerRef, {
+            email: BOOTSTRAP_OWNER_EMAIL.toLowerCase(),
+            role: 'owner',
+            plateAccess: 'Super Admin & Full Vehicle Permissions',
+            createdAt: new Date().toISOString(),
+          });
+        }
+      } catch (e) {
+        console.warn('Bootstrap owner check notice:', e);
+      }
+    };
+    bootstrapCheck();
+  }, []);
+
+  // Listen to Firebase auth changes
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
-      if (currentUser) {
+      if (currentUser?.email) {
         try {
-          const isBootstrap = currentUser.email?.toLowerCase() === BOOTSTRAP_OWNER_EMAIL.toLowerCase();
-          const adminDocRef = doc(db, 'admins', currentUser.uid);
-          const adminSnap = await getDoc(adminDocRef);
+          const isBootstrap = currentUser.email.toLowerCase() === BOOTSTRAP_OWNER_EMAIL.toLowerCase();
+          const docId = currentUser.email.replace(/[^a-zA-Z0-9_-]/g, '_');
+          const adminSnap = await getDoc(doc(db, 'admins', docId));
 
           if (adminSnap.exists()) {
             setAdminProfile({
-              id: currentUser.uid,
+              id: docId,
               ...(adminSnap.data() as Omit<AdminUser, 'id'>),
             });
           } else if (isBootstrap) {
-            const ownerRecord: Omit<AdminUser, 'id'> = {
-              email: currentUser.email || BOOTSTRAP_OWNER_EMAIL,
-              role: 'owner',
-              plateAccess: 'Full Showroom & Vehicle Plate Permissions (Owner)',
-              createdAt: new Date().toISOString(),
-            };
-            try {
-              await setDoc(adminDocRef, ownerRecord);
-            } catch (err) {
-              console.warn('Bootstrap owner self-write notice:', err);
-            }
             setAdminProfile({
-              id: currentUser.uid,
-              ...ownerRecord,
+              id: docId,
+              email: currentUser.email,
+              role: 'owner',
+              plateAccess: 'Super Admin & Full Permissions',
             });
           }
         } catch (err) {
-          console.error('Error checking admin doc:', err);
+          console.warn('Error fetching admin doc for current user:', err);
         }
       }
       setLoading(false);
@@ -97,19 +117,94 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => unsubscribe();
   }, []);
 
-  const unlockWithPin = (enteredPin: string): boolean => {
-    if (enteredPin.trim() === ADMIN_PIN) {
-      setIsPinUnlocked(true);
-      localStorage.setItem('madina_admin_pin_auth', 'true');
-      setIsPinModalOpen(false);
-      return true;
+  // Unlock with BOTH Email and PIN
+  const unlockWithEmailAndPin = async (
+    email: string,
+    enteredPin: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanPin = enteredPin.trim();
+
+    // 1. Verify PIN
+    if (cleanPin !== ADMIN_PIN) {
+      return { success: false, error: 'Incorrect PIN.' };
     }
-    return false;
+
+    // 2. Check if Email is authorized
+    if (cleanEmail === BOOTSTRAP_OWNER_EMAIL.toLowerCase()) {
+      // Primary Owner is always authorized
+      setIsPinUnlocked(true);
+      setAdminEmail(cleanEmail);
+      localStorage.setItem('madina_admin_pin_auth', 'true');
+      localStorage.setItem('madina_admin_email', cleanEmail);
+      setIsPinModalOpen(false);
+      return { success: true };
+    }
+
+    // Check Firestore 'admins' collection for this email
+    try {
+      const docId = cleanEmail.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const directSnap = await getDoc(doc(db, 'admins', docId));
+
+      if (directSnap.exists()) {
+        const rawData = directSnap.data();
+        setIsPinUnlocked(true);
+        setAdminEmail(cleanEmail);
+        setAdminProfile({
+          id: docId,
+          email: rawData.email,
+          role: rawData.role || 'admin',
+          plateAccess: rawData.plateAccess,
+          addedBy: rawData.addedBy,
+          createdAt: rawData.createdAt,
+        });
+        localStorage.setItem('madina_admin_pin_auth', 'true');
+        localStorage.setItem('madina_admin_email', cleanEmail);
+        setIsPinModalOpen(false);
+        return { success: true };
+      }
+
+      // Also try query by email field
+      const q = query(collection(db, 'admins'), where('email', '==', cleanEmail));
+      const qSnap = await getDocs(q);
+      if (!qSnap.empty) {
+        const firstDoc = qSnap.docs[0];
+        const rawData = firstDoc.data();
+        setIsPinUnlocked(true);
+        setAdminEmail(cleanEmail);
+        setAdminProfile({
+          id: firstDoc.id,
+          email: rawData.email,
+          role: rawData.role || 'admin',
+          plateAccess: rawData.plateAccess,
+          addedBy: rawData.addedBy,
+          createdAt: rawData.createdAt,
+        });
+        localStorage.setItem('madina_admin_pin_auth', 'true');
+        localStorage.setItem('madina_admin_email', cleanEmail);
+        setIsPinModalOpen(false);
+        return { success: true };
+      }
+
+      return {
+        success: false,
+        error: 'This email is not authorized. The dealership owner must grant permission to your email first.',
+      };
+    } catch (err) {
+      console.error('Error verifying email authorization in Firestore:', err);
+      return {
+        success: false,
+        error: 'Error checking authorization. Please verify network and try again.',
+      };
+    }
   };
 
   const lockAdmin = () => {
     setIsPinUnlocked(false);
+    setAdminEmail(null);
+    setAdminProfile(null);
     localStorage.removeItem('madina_admin_pin_auth');
+    localStorage.removeItem('madina_admin_email');
   };
 
   const signInWithGoogle = async () => {
@@ -125,7 +220,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     lockAdmin();
     try {
       await firebaseSignOut(auth);
-      setAdminProfile(null);
     } catch (error) {
       console.error('Sign out error:', error);
     }
@@ -141,8 +235,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isManager,
         hasFullPermission,
         isPinUnlocked,
+        adminEmail,
         adminProfile,
-        unlockWithPin,
+        unlockWithEmailAndPin,
         lockAdmin,
         signInWithGoogle,
         signOut,

@@ -117,7 +117,7 @@ export const Footer: React.FC<FooterProps> = ({ onOpenAdmin }) => {
                 ) : (
                   <>
                     <Lock className="w-3.5 h-3.5 text-orange-400" />
-                    <span>Admin PIN (19madina19)</span>
+                    <span>{t.adminLogin}</span>
                   </>
                 )}
               </button>
