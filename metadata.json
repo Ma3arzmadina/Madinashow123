@@ -1,0 +1,6 @@
+{
+  "name": "Madina Trucks | Madinashop",
+  "description": "Premier heavy & commercial truck dealership in Erbil, Kurdistan. Browse verified inventory, truck specs, prices in USD, and contact us directly.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

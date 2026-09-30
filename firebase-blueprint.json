@@ -1,0 +1,165 @@
+{
+  "entities": {
+    "Truck": {
+      "title": "Truck Listing",
+      "description": "Commercial truck vehicle listing for sale at Madina dealership",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Title of the truck listing",
+          "minLength": 3,
+          "maxLength": 150
+        },
+        "make": {
+          "type": "string",
+          "description": "Manufacturer brand",
+          "maxLength": 60
+        },
+        "model": {
+          "type": "string",
+          "description": "Model designation",
+          "maxLength": 60
+        },
+        "year": {
+          "type": "number",
+          "description": "Manufacturing year"
+        },
+        "mileage": {
+          "type": "number",
+          "description": "Mileage in kilometers"
+        },
+        "priceUSD": {
+          "type": "number",
+          "description": "Price in US Dollars"
+        },
+        "plateNumber": {
+          "type": "string",
+          "description": "Plate number or registration ID",
+          "maxLength": 60
+        },
+        "transmission": {
+          "type": "string",
+          "description": "Transmission type",
+          "enum": ["Automatic", "Manual", "Semi-Automatic"]
+        },
+        "fuelType": {
+          "type": "string",
+          "description": "Fuel type",
+          "enum": ["Diesel", "Electric", "Hybrid", "CNG"]
+        },
+        "axleConfig": {
+          "type": "string",
+          "description": "Axle configuration",
+          "maxLength": 30
+        },
+        "horsepower": {
+          "type": "number",
+          "description": "Horsepower rating"
+        },
+        "condition": {
+          "type": "string",
+          "description": "Vehicle condition",
+          "enum": ["Used", "Brand New", "Certified Pre-Owned"]
+        },
+        "color": {
+          "type": "string",
+          "description": "Exterior color",
+          "maxLength": 40
+        },
+        "descriptionEn": {
+          "type": "string",
+          "description": "Description in English",
+          "maxLength": 3000
+        },
+        "descriptionKu": {
+          "type": "string",
+          "description": "Description in Kurdish",
+          "maxLength": 3000
+        },
+        "descriptionAr": {
+          "type": "string",
+          "description": "Description in Arabic",
+          "maxLength": 3000
+        },
+        "images": {
+          "type": "array",
+          "description": "Gallery image URLs for the truck"
+        },
+        "status": {
+          "type": "string",
+          "description": "Listing availability status",
+          "enum": ["available", "reserved", "sold"]
+        },
+        "featured": {
+          "type": "boolean",
+          "description": "Featured on homepage showcase"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update timestamp"
+        },
+        "createdBy": {
+          "type": "string",
+          "description": "UID of creator admin",
+          "maxLength": 128
+        },
+        "createdByEmail": {
+          "type": "string",
+          "description": "Email of creator admin",
+          "maxLength": 150
+        }
+      },
+      "required": ["title", "make", "model", "year", "mileage", "priceUSD", "status", "createdBy"]
+    },
+    "AdminUser": {
+      "title": "Admin User",
+      "description": "Authorized dealership admin or manager with listing management permissions",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "description": "User email address",
+          "maxLength": 150
+        },
+        "role": {
+          "type": "string",
+          "description": "Admin role",
+          "enum": ["owner", "admin", "manager"]
+        },
+        "addedBy": {
+          "type": "string",
+          "description": "UID or email of granter",
+          "maxLength": 150
+        },
+        "plateAccess": {
+          "type": "string",
+          "description": "Plate access permissions note",
+          "maxLength": 100
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Admin assignment timestamp"
+        }
+      },
+      "required": ["email", "role"]
+    }
+  },
+  "firestore": {
+    "/trucks/{truckId}": {
+      "schema": { "$ref": "#/entities/Truck" },
+      "description": "Truck inventory listings at Madina dealership"
+    },
+    "/admins/{userId}": {
+      "schema": { "$ref": "#/entities/AdminUser" },
+      "description": "Authorized administrators with listing management permissions"
+    }
+  }
+}

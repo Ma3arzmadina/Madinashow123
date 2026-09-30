@@ -1,0 +1,54 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidTruck(data) {
+      return data.keys().hasAll(['title', 'make', 'model', 'year', 'mileage', 'priceUSD', 'status']) &&
+        data.title is string && data.title.size() >= 2 && data.title.size() <= 150 &&
+        data.make is string && data.make.size() <= 60 &&
+        data.model is string && data.model.size() <= 60 &&
+        data.year is number && data.year >= 1970 && data.year <= 2035 &&
+        data.mileage is number && data.mileage >= 0 &&
+        data.priceUSD is number && data.priceUSD >= 0 &&
+        (data.status == 'available' || data.status == 'reserved' || data.status == 'sold') &&
+        (!('plateNumber' in data) || (data.plateNumber is string && data.plateNumber.size() <= 60)) &&
+        (!('color' in data) || (data.color is string && data.color.size() <= 50)) &&
+        (!('horsepower' in data) || (data.horsepower is number && data.horsepower >= 0)) &&
+        (!('axleConfig' in data) || (data.axleConfig is string && data.axleConfig.size() <= 30)) &&
+        (!('descriptionEn' in data) || (data.descriptionEn is string && data.descriptionEn.size() <= 3500)) &&
+        (!('descriptionKu' in data) || (data.descriptionKu is string && data.descriptionKu.size() <= 3500)) &&
+        (!('descriptionAr' in data) || (data.descriptionAr is string && data.descriptionAr.size() <= 3500)) &&
+        (!('images' in data) || (data.images is list && data.images.size() <= 30));
+    }
+
+    // Trucks collection - showroom public read, secure validated writes
+    match /trucks/{truckId} {
+      allow read: if true;
+      allow create, update: if isValidId(truckId) && isValidTruck(incoming());
+      allow delete: if isValidId(truckId);
+    }
+
+    // Admins & roles collection
+    match /admins/{userId} {
+      allow read: if true;
+      allow create, update, delete: if isValidId(userId);
+    }
+  }
+}
