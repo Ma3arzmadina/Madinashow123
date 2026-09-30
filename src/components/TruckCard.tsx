@@ -3,6 +3,7 @@ import { Truck } from '../types';
 import { useLanguage } from '../context/LanguageContext';
 import { useAuth } from '../context/AuthContext';
 import { DEALERSHIP_INFO } from '../firebase/config';
+import { DEFAULT_TRUCK_IMAGE } from '../utils/imageHelper';
 import {
   Calendar,
   Gauge,
@@ -74,6 +75,10 @@ export const TruckCard: React.FC<TruckCardProps> = ({
         <img
           src={coverImage}
           alt={truck.title}
+          referrerPolicy="no-referrer"
+          onError={(e) => {
+            e.currentTarget.src = DEFAULT_TRUCK_IMAGE;
+          }}
           className="w-full h-full object-cover group-hover:scale-105 transition duration-500"
           loading="lazy"
         />

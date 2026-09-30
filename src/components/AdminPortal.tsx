@@ -1,10 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Truck, AdminUser } from '../types';
 import { useLanguage } from '../context/LanguageContext';
 import { useAuth } from '../context/AuthContext';
 import { db, BOOTSTRAP_OWNER_EMAIL } from '../firebase/config';
 import { handleFirestoreError, OperationType } from '../firebase/errors';
 import { SEED_TRUCKS } from '../data/seedTrucks';
+import {
+  DEFAULT_TRUCK_IMAGE,
+  TRUCK_PHOTO_PRESETS,
+  compressImageFile,
+  validateImageUrl,
+} from '../utils/imageHelper';
 import {
   collection,
   doc,
@@ -22,7 +28,7 @@ import {
   UserCheck,
   UserPlus,
   Truck as TruckIcon,
-  Image,
+  Image as ImageIcon,
   DollarSign,
   Lock,
   CheckCircle,
@@ -30,6 +36,9 @@ import {
   Sparkles,
   Info,
   Mail,
+  Upload,
+  Check,
+  Camera,
 } from 'lucide-react';
 
 interface AdminPortalProps {
@@ -50,12 +59,15 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   onTrucksChanged,
 }) => {
   const { t } = useLanguage();
-  const { user, hasFullPermission, isPinUnlocked, lockAdmin, adminEmail, isOwner } = useAuth();
+  const { user, hasFullPermission, lockAdmin, adminEmail, isOwner } = useAuth();
 
   const [activeTab, setActiveTab] = useState<'inventory' | 'create' | 'permissions'>('inventory');
   const [loading, setLoading] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Form State
   const [formData, setFormData] = useState<{
@@ -96,14 +108,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     descriptionEn: '',
     descriptionKu: '',
     descriptionAr: '',
-    images: [
-      'https://images.unsplash.com/photo-1601584115197-04ecc0da31d7?auto=format&fit=crop&w=1200&q=80',
-    ],
+    images: [DEFAULT_TRUCK_IMAGE],
     status: 'available',
     featured: false,
   });
 
   const [newImageUrl, setNewImageUrl] = useState('');
+  const [urlStatus, setUrlStatus] = useState<'idle' | 'valid' | 'invalid'>('idle');
 
   // Permissions state
   const [adminsList, setAdminsList] = useState<AdminUser[]>([]);
@@ -132,7 +143,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         descriptionEn: editingTruck.descriptionEn || '',
         descriptionKu: editingTruck.descriptionKu || '',
         descriptionAr: editingTruck.descriptionAr || '',
-        images: editingTruck.images && editingTruck.images.length > 0 ? editingTruck.images : [],
+        images: editingTruck.images && editingTruck.images.length > 0 ? editingTruck.images : [DEFAULT_TRUCK_IMAGE],
         status: editingTruck.status,
         featured: editingTruck.featured || false,
       });
@@ -162,20 +173,81 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleAddImage = () => {
+  // Handle URL change with auto-validation
+  const handleUrlInputChange = async (value: string) => {
+    setNewImageUrl(value);
+    if (!value.trim()) {
+      setUrlStatus('idle');
+      return;
+    }
+    const isValid = await validateImageUrl(value.trim());
+    setUrlStatus(isValid ? 'valid' : 'invalid');
+  };
+
+  const handleAddImageUrl = () => {
     if (!newImageUrl.trim()) return;
     setFormData((prev) => ({
       ...prev,
-      images: [...prev.images, newImageUrl.trim()],
+      images: [...prev.images.filter((img) => img !== DEFAULT_TRUCK_IMAGE), newImageUrl.trim()],
     }));
     setNewImageUrl('');
+    setUrlStatus('idle');
+  };
+
+  // Direct File Upload from phone or computer
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setUploadingImage(true);
+    setErrorMessage(null);
+    try {
+      const newImages: string[] = [];
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        if (file.type.startsWith('image/')) {
+          const dataUrl = await compressImageFile(file, 1100, 0.75);
+          newImages.push(dataUrl);
+        }
+      }
+
+      if (newImages.length > 0) {
+        setFormData((prev) => ({
+          ...prev,
+          images: [
+            ...prev.images.filter((img) => img !== DEFAULT_TRUCK_IMAGE),
+            ...newImages,
+          ],
+        }));
+        setSuccessMessage(`Successfully uploaded ${newImages.length} photo(s)!`);
+      }
+    } catch (err) {
+      console.error('File upload error:', err);
+      setErrorMessage('Could not process photo. Please try a different image.');
+    } finally {
+      setUploadingImage(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleAddPresetPhoto = (presetUrl: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      images: [
+        ...prev.images.filter((img) => img !== DEFAULT_TRUCK_IMAGE),
+        presetUrl,
+      ],
+    }));
   };
 
   const handleRemoveImage = (index: number) => {
-    setFormData((prev) => ({
-      ...prev,
-      images: prev.images.filter((_, i) => i !== index),
-    }));
+    setFormData((prev) => {
+      const filtered = prev.images.filter((_, i) => i !== index);
+      return {
+        ...prev,
+        images: filtered.length > 0 ? filtered : [DEFAULT_TRUCK_IMAGE],
+      };
+    });
   };
 
   const handleSubmitListing = async (e: React.FormEvent) => {
@@ -208,7 +280,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         descriptionEn: formData.descriptionEn.trim(),
         descriptionKu: formData.descriptionKu.trim(),
         descriptionAr: formData.descriptionAr.trim(),
-        images: formData.images.length > 0 ? formData.images : ['https://images.unsplash.com/photo-1601584115197-04ecc0da31d7?auto=format&fit=crop&w=1200&q=80'],
+        images: formData.images.length > 0 ? formData.images : [DEFAULT_TRUCK_IMAGE],
         status: formData.status,
         featured: formData.featured,
         createdBy: user?.uid || adminEmail || 'madina_admin',
@@ -229,17 +301,18 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     }
   };
 
+  // Permanent Delete Truck from Firestore
   const handleDeleteTruck = async (truckId: string) => {
     if (!hasFullPermission) {
       alert(t.onlyAdminsCanPost);
       return;
     }
-    if (!confirm(t.confirmDeleteDesc)) return;
+    if (!confirm('Are you sure you want to permanently delete this truck from the showroom?')) return;
 
     setLoading(true);
     try {
       await deleteDoc(doc(db, 'trucks', truckId));
-      setSuccessMessage('Truck listing removed from inventory.');
+      setSuccessMessage('Truck permanently removed from showroom.');
       onTrucksChanged();
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `trucks/${truckId}`);
@@ -249,28 +322,30 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     }
   };
 
+  // Seed sample database
   const handleSeedDatabase = async () => {
     if (!hasFullPermission) {
       alert(t.onlyAdminsCanPost);
       return;
     }
-    if (!confirm(t.seedDataConfirm)) return;
+    if (!confirm('Load sample dealership trucks into Firestore?')) return;
 
     setLoading(true);
     try {
-      for (const truck of SEED_TRUCKS) {
-        const truckId = `truck_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      for (let i = 0; i < SEED_TRUCKS.length; i++) {
+        const truck = SEED_TRUCKS[i];
+        const truckId = `truck_${Date.now()}_${i + 1}`;
         await setDoc(doc(db, 'trucks', truckId), {
           ...truck,
           createdBy: user?.uid || adminEmail || 'madina_admin',
           createdByEmail: user?.email || adminEmail || BOOTSTRAP_OWNER_EMAIL,
         });
       }
-      setSuccessMessage(t.seedingDone);
+      setSuccessMessage('Sample trucks loaded into showroom!');
       onTrucksChanged();
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, 'trucks');
-      setErrorMessage('Could not seed inventory.');
+      setErrorMessage('Could not load sample inventory.');
     } finally {
       setLoading(false);
     }
@@ -292,7 +367,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         createdAt: new Date().toISOString(),
       };
       await setDoc(doc(db, 'admins', sanitizedId), payload);
-      setSuccessMessage(`Permission granted! ${cleanEmail} can now log in using the admin PIN.`);
+      setSuccessMessage(`Permission granted! ${cleanEmail} can now sign in.`);
       setNewAdminEmail('');
       loadAdmins();
     } catch (err) {
@@ -322,7 +397,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/90 backdrop-blur-md overflow-y-auto animate-in fade-in duration-200">
       <div className="relative w-full max-w-5xl my-auto bg-[#070E1C] border border-[#1A2F4C] rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
-        {/* Top Header in Navy & Black */}
+        {/* Top Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#14233C] bg-[#030712]">
           <div className="flex items-center gap-3">
             <div className="p-2.5 rounded-2xl bg-orange-500/15 border border-orange-500/30 text-orange-400">
@@ -430,7 +505,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 <div>
                   <h4 className="text-base font-black text-white">Current Showroom Listings</h4>
                   <p className="text-xs text-slate-300 font-medium">
-                    Manage prices, license plates, remove sold trucks, or post new arrivals.
+                    Manage prices, license plates, remove sold trucks, or post new arrivals. Deleting a truck permanently removes it from Firestore.
                   </p>
                 </div>
 
@@ -454,9 +529,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                         descriptionEn: '',
                         descriptionKu: '',
                         descriptionAr: '',
-                        images: [
-                          'https://images.unsplash.com/photo-1601584115197-04ecc0da31d7?auto=format&fit=crop&w=1200&q=80',
-                        ],
+                        images: [DEFAULT_TRUCK_IMAGE],
                         status: 'available',
                         featured: false,
                       });
@@ -472,9 +545,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                     onClick={handleSeedDatabase}
                     disabled={loading}
                     className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-[#0B1528] hover:bg-[#11213C] text-orange-400 font-bold text-xs border border-orange-500/30 transition"
+                    title="Load sample trucks into Firestore"
                   >
                     <Sparkles className="w-4 h-4" />
-                    <span>{t.seedSampleData}</span>
+                    <span>Load Sample Trucks</span>
                   </button>
                 </div>
               </div>
@@ -482,16 +556,24 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               {trucks.length === 0 ? (
                 <div className="text-center py-12 p-8 border border-dashed border-[#1E3352] rounded-3xl bg-[#030712]/50">
                   <TruckIcon className="w-12 h-12 text-slate-500 mx-auto mb-3" />
-                  <h5 className="text-base font-bold text-white mb-1">No Trucks in Firestore yet</h5>
+                  <h5 className="text-base font-bold text-white mb-1">Your Showroom is Empty</h5>
                   <p className="text-xs text-slate-300 max-w-sm mx-auto mb-4">
-                    Your database is ready. You can populate it with 6 high-detail showroom trucks or post your own.
+                    All trucks have been removed or none added yet. You can post a new truck or load sample trucks.
                   </p>
-                  <button
-                    onClick={handleSeedDatabase}
-                    className="px-5 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-black font-black text-xs shadow-md transition"
-                  >
-                    {t.seedSampleData}
-                  </button>
+                  <div className="flex items-center justify-center gap-3">
+                    <button
+                      onClick={() => setActiveTab('create')}
+                      className="px-5 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-black font-black text-xs shadow-md transition"
+                    >
+                      {t.addTruckListing}
+                    </button>
+                    <button
+                      onClick={handleSeedDatabase}
+                      className="px-4 py-2.5 rounded-xl bg-[#0B1528] hover:bg-[#11213C] text-orange-400 font-bold text-xs border border-orange-500/30 transition"
+                    >
+                      Load Sample Trucks
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -502,8 +584,12 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                     >
                       <div className="flex items-center gap-3.5">
                         <img
-                          src={trk.images?.[0] || 'https://images.unsplash.com/photo-1601584115197-04ecc0da31d7?auto=format&fit=crop&w=400&q=80'}
+                          src={trk.images?.[0] || DEFAULT_TRUCK_IMAGE}
                           alt=""
+                          referrerPolicy="no-referrer"
+                          onError={(e) => {
+                            e.currentTarget.src = DEFAULT_TRUCK_IMAGE;
+                          }}
                           className="w-16 h-12 object-cover rounded-xl border border-[#1A2F4C] shrink-0"
                         />
                         <div>
@@ -556,7 +642,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                               descriptionEn: trk.descriptionEn || '',
                               descriptionKu: trk.descriptionKu || '',
                               descriptionAr: trk.descriptionAr || '',
-                              images: trk.images || [],
+                              images: trk.images || [DEFAULT_TRUCK_IMAGE],
                               status: trk.status,
                               featured: trk.featured || false,
                             });
@@ -775,53 +861,116 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 </div>
               </div>
 
-              {/* Multi-Image Gallery */}
-              <div className="p-4 rounded-3xl bg-[#030712] border border-[#1A2F4C] space-y-3">
+              {/* Enhanced Photo Manager: File Upload + Presets + Validated URL */}
+              <div className="p-5 rounded-3xl bg-[#030712] border border-[#1A2F4C] space-y-4">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-black text-white uppercase tracking-wider flex items-center gap-1.5">
-                    <Image className="w-4 h-4 text-orange-400" />
-                    <span>{t.galleryImages}</span>
+                    <ImageIcon className="w-4 h-4 text-orange-400" />
+                    <span>Truck Photos & Gallery ({formData.images.length})</span>
                   </label>
-                  <span className="text-[11px] text-orange-400 font-mono font-bold">
-                    {formData.images.length} photos
+                  <span className="text-[11px] text-orange-400 font-bold">
+                    Supports Direct Camera / Phone Gallery & URLs
                   </span>
                 </div>
 
-                {/* Add Image Input */}
-                <div className="flex gap-2">
+                {/* Direct Upload from Camera / Phone Button */}
+                <div className="flex flex-wrap items-center gap-3">
                   <input
-                    type="url"
-                    value={newImageUrl}
-                    onChange={(e) => setNewImageUrl(e.target.value)}
-                    placeholder="Paste direct image URL (https://...)"
-                    className="flex-1 px-4 py-2.5 bg-[#070E1C] border border-[#1E3352] rounded-xl text-white text-xs focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFileUpload}
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    id="truck-file-upload"
                   />
+                  <label
+                    htmlFor="truck-file-upload"
+                    className="cursor-pointer inline-flex items-center gap-2 px-5 py-3 rounded-2xl bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-black font-black text-xs shadow-lg shadow-orange-500/20 transition transform hover:-translate-y-0.5"
+                  >
+                    <Camera className="w-4 h-4" />
+                    <span>{uploadingImage ? 'Processing Photos...' : '📸 Upload Photos from Device / Camera'}</span>
+                  </label>
+
+                  <span className="text-xs text-slate-400 font-medium">or paste image link below</span>
+                </div>
+
+                {/* Paste URL Input with Live Validation */}
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <div className="relative flex-1">
+                    <input
+                      type="url"
+                      value={newImageUrl}
+                      onChange={(e) => handleUrlInputChange(e.target.value)}
+                      placeholder="Paste image link (e.g. https://... .jpg / .png)"
+                      className="w-full px-4 py-3 bg-[#070E1C] border border-[#1E3352] rounded-xl text-white text-xs focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                    />
+                    {urlStatus === 'valid' && (
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-400 text-xs font-bold flex items-center gap-1">
+                        <Check className="w-3.5 h-3.5" /> Image Valid
+                      </span>
+                    )}
+                    {urlStatus === 'invalid' && (
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-rose-400 text-xs font-bold">
+                        ⚠️ Link Unreachable
+                      </span>
+                    )}
+                  </div>
                   <button
                     type="button"
-                    onClick={handleAddImage}
-                    className="px-5 py-2.5 bg-orange-500 hover:bg-orange-600 text-black font-black text-xs rounded-xl transition"
+                    onClick={handleAddImageUrl}
+                    className="px-5 py-3 bg-[#0B1528] hover:bg-[#11213C] text-orange-400 border border-orange-500/40 font-black text-xs rounded-xl transition"
                   >
-                    {t.addImageUrl}
+                    Add Link
                   </button>
                 </div>
 
-                {/* Image Previews */}
+                {/* 1-Click Truck Photo Presets */}
+                <div>
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-2">
+                    Quick Sample Truck Photos (1-Click Add):
+                  </span>
+                  <div className="flex flex-wrap gap-2">
+                    {TRUCK_PHOTO_PRESETS.map((preset, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => handleAddPresetPhoto(preset.url)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#070E1C] border border-[#1E3352] hover:border-orange-500 text-white text-xs font-bold transition"
+                      >
+                        <Plus className="w-3 h-3 text-orange-400" />
+                        <span>{preset.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Active Photo Thumbnails */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2.5 pt-2">
                   {formData.images.map((img, idx) => (
                     <div
                       key={idx}
                       className="group relative aspect-[16/10] rounded-xl overflow-hidden border border-[#1A2F4C] bg-[#070E1C]"
                     >
-                      <img src={img} alt="" className="w-full h-full object-cover" />
+                      <img
+                        src={img}
+                        alt=""
+                        referrerPolicy="no-referrer"
+                        onError={(e) => {
+                          e.currentTarget.src = DEFAULT_TRUCK_IMAGE;
+                        }}
+                        className="w-full h-full object-cover"
+                      />
                       {idx === 0 && (
                         <span className="absolute top-1 left-1 px-1.5 py-0.5 rounded text-[9px] font-black bg-orange-500 text-black uppercase">
-                          {t.coverImage}
+                          Cover
                         </span>
                       )}
                       <button
                         type="button"
                         onClick={() => handleRemoveImage(idx)}
                         className="absolute top-1 right-1 p-1 rounded-md bg-rose-600 text-white opacity-0 group-hover:opacity-100 transition shadow"
+                        title="Remove photo"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -901,7 +1050,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             </form>
           )}
 
-          {/* TAB 3: PLATES & PERMISSIONS (GRANT ACCESS BY EMAIL) */}
+          {/* TAB 3: PLATES & PERMISSIONS */}
           {activeTab === 'permissions' && (
             <div className="space-y-6">
               <div className="p-5 rounded-3xl bg-[#030712] border border-[#1A2F4C] flex items-start gap-3.5">
@@ -914,7 +1063,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 </div>
               </div>
 
-              {/* Grant New Admin Form: Write email and grant permission */}
+              {/* Grant New Admin Form */}
               <form
                 onSubmit={handleAddAdmin}
                 className="p-6 rounded-3xl bg-[#030712] border border-orange-500/40 space-y-4 shadow-xl shadow-orange-500/5"
@@ -993,7 +1142,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   <span>Authorized Administrators in Database ({adminsList.length + 1})</span>
                 </h5>
 
-                {/* Primary Bootstrap Owner card */}
                 <div className="flex items-center justify-between p-4 bg-[#030712] border border-orange-500/40 rounded-2xl">
                   <div className="flex items-center gap-3">
                     <div className="p-2.5 rounded-xl bg-orange-500/15 text-orange-400">

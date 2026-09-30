@@ -3,6 +3,7 @@ import { Truck } from '../types';
 import { useLanguage } from '../context/LanguageContext';
 import { useAuth } from '../context/AuthContext';
 import { DEALERSHIP_INFO } from '../firebase/config';
+import { DEFAULT_TRUCK_IMAGE } from '../utils/imageHelper';
 import {
   X,
   ChevronLeft,
@@ -153,8 +154,12 @@ export const TruckDetailModal: React.FC<TruckDetailModalProps> = ({
           <div className="space-y-3">
             <div className="relative aspect-[16/9] w-full rounded-3xl overflow-hidden bg-black border border-[#1A2F4C] group">
               <img
-                src={images[activeImageIndex]}
+                src={images[activeImageIndex] || DEFAULT_TRUCK_IMAGE}
                 alt={truck.title}
+                referrerPolicy="no-referrer"
+                onError={(e) => {
+                  e.currentTarget.src = DEFAULT_TRUCK_IMAGE;
+                }}
                 className="w-full h-full object-cover select-none"
               />
 
@@ -210,7 +215,15 @@ export const TruckDetailModal: React.FC<TruckDetailModalProps> = ({
                         : 'border-[#1A2F4C] opacity-60 hover:opacity-100'
                     }`}
                   >
-                    <img src={img} alt="" className="w-full h-full object-cover" />
+                    <img
+                      src={img}
+                      alt=""
+                      referrerPolicy="no-referrer"
+                      onError={(e) => {
+                        e.currentTarget.src = DEFAULT_TRUCK_IMAGE;
+                      }}
+                      className="w-full h-full object-cover"
+                    />
                   </button>
                 ))}
               </div>
@@ -356,8 +369,12 @@ export const TruckDetailModal: React.FC<TruckDetailModalProps> = ({
             <X className="w-6 h-6" />
           </button>
           <img
-            src={images[activeImageIndex]}
+            src={images[activeImageIndex] || DEFAULT_TRUCK_IMAGE}
             alt={truck.title}
+            referrerPolicy="no-referrer"
+            onError={(e) => {
+              e.currentTarget.src = DEFAULT_TRUCK_IMAGE;
+            }}
             className="max-w-full max-h-[90vh] object-contain rounded-2xl"
             onClick={(e) => e.stopPropagation()}
           />

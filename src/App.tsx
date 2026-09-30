@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { collection, onSnapshot, doc, deleteDoc } from 'firebase/firestore';
-import { db } from './firebase/config';
+import { collection, onSnapshot, doc, getDoc, getDocs, setDoc, deleteDoc } from 'firebase/firestore';
+import { db, BOOTSTRAP_OWNER_EMAIL } from './firebase/config';
 import { handleFirestoreError, OperationType } from './firebase/errors';
 import { Truck, FilterState } from './types';
 import { SEED_TRUCKS } from './data/seedTrucks';
@@ -16,7 +16,7 @@ import { AdminPinModal } from './components/AdminPinModal';
 import { ContactSection } from './components/ContactSection';
 import { Footer } from './components/Footer';
 import { LanguageModal } from './components/LanguageModal';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, Plus } from 'lucide-react';
 
 const MainApp: React.FC = () => {
   const { t } = useLanguage();
@@ -45,44 +45,64 @@ const MainApp: React.FC = () => {
     sortBy: 'newest',
   });
 
-  // Real-time Firestore synchronization
+  // Persistent Firestore synchronization:
+  // Deleted trucks STAY DELETED and never re-appear automatically.
   useEffect(() => {
-    const trucksColPath = 'trucks';
-    const unsubscribe = onSnapshot(
-      collection(db, trucksColPath),
-      (snapshot) => {
-        if (!snapshot.empty) {
+    let unsubscribe: () => void = () => {};
+
+    const initializeAndListen = async () => {
+      try {
+        const settingsRef = doc(db, 'settings', 'showroom');
+        const settingsSnap = await getDoc(settingsRef);
+
+        // Perform one-time initial seed ONLY if showroom has never been setup
+        if (!settingsSnap.exists()) {
+          const currentTrucksSnap = await getDocs(collection(db, 'trucks'));
+          if (currentTrucksSnap.empty) {
+            for (let i = 0; i < SEED_TRUCKS.length; i++) {
+              const truck = SEED_TRUCKS[i];
+              const docId = `truck_init_${Date.now()}_${i + 1}`;
+              await setDoc(doc(db, 'trucks', docId), {
+                ...truck,
+                createdBy: 'madina_dealership',
+                createdByEmail: BOOTSTRAP_OWNER_EMAIL,
+              });
+            }
+          }
+          await setDoc(settingsRef, {
+            initialized: true,
+            createdAt: new Date().toISOString(),
+          });
+        }
+      } catch (err) {
+        console.warn('Initial database setup check notice:', err);
+      }
+
+      // Attach real-time Firestore listener
+      // If collection is empty because the user deleted trucks, it stays empty!
+      unsubscribe = onSnapshot(
+        collection(db, 'trucks'),
+        (snapshot) => {
           const loaded: Truck[] = [];
           snapshot.forEach((docSnap) => {
             loaded.push({ id: docSnap.id, ...(docSnap.data() as Omit<Truck, 'id'>) });
           });
           setTrucks(loaded);
-        } else {
-          // If Firestore is empty initially, load seed trucks with generated IDs
-          const initialSeed: Truck[] = SEED_TRUCKS.map((st, i) => ({
-            id: `seed_truck_${i + 1}`,
-            ...st,
-            createdBy: 'madina_dealership',
-            createdByEmail: 'yado14007@gmail.com',
-          }));
-          setTrucks(initialSeed);
+          setLoading(false);
+        },
+        (error) => {
+          console.error('Firestore onSnapshot error:', error);
+          setLoading(false);
+          handleFirestoreError(error, OperationType.GET, 'trucks');
         }
-        setLoading(false);
-      },
-      (error) => {
-        console.error('Firestore onSnapshot notice:', error);
-        const initialSeed: Truck[] = SEED_TRUCKS.map((st, i) => ({
-          id: `seed_truck_${i + 1}`,
-          ...st,
-          createdBy: 'madina_dealership',
-        }));
-        setTrucks(initialSeed);
-        setLoading(false);
-        handleFirestoreError(error, OperationType.GET, trucksColPath);
-      }
-    );
+      );
+    };
 
-    return () => unsubscribe();
+    initializeAndListen();
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
   }, []);
 
   // Compute available makes, models, years for filtering
@@ -152,6 +172,7 @@ const MainApp: React.FC = () => {
     setIsAdminPortalOpen(true);
   };
 
+  // Permanent Delete
   const handleDeleteTruck = async (truck: Truck) => {
     if (!hasFullPermission) {
       openPinModal();
@@ -160,11 +181,7 @@ const MainApp: React.FC = () => {
     if (!confirm(t.confirmDeleteDesc)) return;
 
     try {
-      if (truck.id.startsWith('seed_truck_')) {
-        setTrucks((prev) => prev.filter((t) => t.id !== truck.id));
-      } else {
-        await deleteDoc(doc(db, 'trucks', truck.id));
-      }
+      await deleteDoc(doc(db, 'trucks', truck.id));
       if (selectedTruck?.id === truck.id) {
         setSelectedTruck(null);
       }
@@ -174,11 +191,11 @@ const MainApp: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-amber-500 selection:text-slate-950">
+    <div className="min-h-screen bg-[#030712] text-slate-100 flex flex-col font-sans selection:bg-orange-500 selection:text-black">
       {/* Startup Language Selection Modal */}
       <LanguageModal />
 
-      {/* Admin PIN Unlock Modal (19madina19) */}
+      {/* Admin Email + PIN Security Modal */}
       <AdminPinModal
         onSuccess={() => {
           setIsAdminPortalOpen(true);
@@ -210,28 +227,30 @@ const MainApp: React.FC = () => {
         <div className="flex flex-col md:flex-row items-start md:items-end justify-between gap-4 mb-8">
           <div>
             <div className="flex items-center gap-2 mb-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse" />
-              <span className="text-xs font-mono font-bold uppercase tracking-wider text-amber-400">
+              <span className="w-2.5 h-2.5 rounded-full bg-orange-400 animate-pulse" />
+              <span className="text-xs font-mono font-black uppercase tracking-wider text-orange-400">
                 Madinashop Official Inventory
               </span>
             </div>
             <h2 className="text-3xl sm:text-4xl font-black text-white tracking-tight">
               {t.allTrucks}
             </h2>
-            <p className="text-sm text-slate-400 mt-1 max-w-xl">
+            <p className="text-sm text-slate-300 mt-1 max-w-xl font-normal">
               {t.inventorySubtitle}
             </p>
           </div>
 
-          <div className="flex items-center gap-2 text-xs text-slate-300 bg-slate-900/90 border border-slate-800 px-4 py-2.5 rounded-2xl shadow-inner">
-            <span className="text-emerald-400 font-bold font-mono text-sm">
-              ${new Intl.NumberFormat('en-US').format(filteredTrucks.length ? Math.min(...filteredTrucks.map((t) => t.priceUSD)) : 40000)}
-              {' '}-{' '}
-              ${new Intl.NumberFormat('en-US').format(filteredTrucks.length ? Math.max(...filteredTrucks.map((t) => t.priceUSD)) : 80000)}
-            </span>
-            <span className="text-slate-600">•</span>
-            <span>{t.priceInDollars}</span>
-          </div>
+          {filteredTrucks.length > 0 && (
+            <div className="flex items-center gap-2 text-xs text-slate-300 bg-[#070E1C] border border-[#1A2F4C] px-4 py-2.5 rounded-2xl shadow-inner font-bold">
+              <span className="text-orange-400 font-mono text-sm">
+                ${new Intl.NumberFormat('en-US').format(Math.min(...filteredTrucks.map((t) => t.priceUSD)))}
+                {' '}-{' '}
+                ${new Intl.NumberFormat('en-US').format(Math.max(...filteredTrucks.map((t) => t.priceUSD)))}
+              </span>
+              <span className="text-slate-600">•</span>
+              <span>{t.priceInDollars}</span>
+            </div>
+          )}
         </div>
 
         {/* Dynamic Filtering System */}
@@ -248,7 +267,7 @@ const MainApp: React.FC = () => {
         {loading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-pulse">
             {[1, 2, 3, 4, 5, 6].map((n) => (
-              <div key={n} className="bg-slate-900 rounded-3xl h-96 border border-slate-800" />
+              <div key={n} className="bg-[#070E1C] rounded-3xl h-96 border border-[#1A2F4C]" />
             ))}
           </div>
         ) : filteredTrucks.length > 0 ? (
@@ -264,32 +283,60 @@ const MainApp: React.FC = () => {
             ))}
           </div>
         ) : (
-          <div className="text-center py-16 px-4 bg-slate-900/50 border border-slate-800 rounded-3xl">
-            <AlertCircle className="w-12 h-12 text-amber-500/70 mx-auto mb-3" />
-            <h3 className="text-lg font-bold text-white mb-1">{t.noTrucksFound}</h3>
-            <p className="text-sm text-slate-400 max-w-md mx-auto mb-6">
-              {t.noTrucksDesc}
+          <div className="text-center py-16 px-4 bg-[#070E1C]/60 border border-[#1A2F4C] rounded-3xl">
+            <AlertCircle className="w-12 h-12 text-orange-400/80 mx-auto mb-3" />
+            <h3 className="text-lg font-black text-white mb-1">
+              {trucks.length === 0 ? 'No Trucks in Showroom' : t.noTrucksFound}
+            </h3>
+            <p className="text-sm text-slate-300 max-w-md mx-auto mb-6">
+              {trucks.length === 0
+                ? 'All trucks have been removed or marked as sold. Use the Admin Portal to post new arrivals.'
+                : t.noTrucksDesc}
             </p>
-            <button
-              onClick={() =>
-                setFilters({
-                  searchQuery: '',
-                  make: '',
-                  model: '',
-                  yearMin: '',
-                  yearMax: '',
-                  mileageMax: '',
-                  priceMin: '',
-                  priceMax: '',
-                  condition: '',
-                  status: '',
-                  sortBy: 'newest',
-                })
-              }
-              className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-amber-400 font-bold text-xs rounded-xl border border-slate-700 transition"
-            >
-              {t.resetFilters}
-            </button>
+            <div className="flex items-center justify-center gap-3">
+              {trucks.length === 0 ? (
+                hasFullPermission ? (
+                  <button
+                    onClick={() => {
+                      setEditingTruck(null);
+                      setIsAdminPortalOpen(true);
+                    }}
+                    className="flex items-center gap-1.5 px-5 py-2.5 bg-orange-500 hover:bg-orange-600 text-black font-black text-xs rounded-xl shadow-md transition"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>{t.addTruckListing}</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={openPinModal}
+                    className="px-5 py-2.5 bg-orange-500 hover:bg-orange-600 text-black font-black text-xs rounded-xl shadow-md transition"
+                  >
+                    {t.adminLogin}
+                  </button>
+                )
+              ) : (
+                <button
+                  onClick={() =>
+                    setFilters({
+                      searchQuery: '',
+                      make: '',
+                      model: '',
+                      yearMin: '',
+                      yearMax: '',
+                      mileageMax: '',
+                      priceMin: '',
+                      priceMax: '',
+                      condition: '',
+                      status: '',
+                      sortBy: 'newest',
+                    })
+                  }
+                  className="px-5 py-2.5 bg-[#0B1528] hover:bg-[#11213C] text-orange-400 font-bold text-xs rounded-xl border border-orange-500/30 transition"
+                >
+                  {t.resetFilters}
+                </button>
+              )}
+            </div>
           </div>
         )}
       </main>

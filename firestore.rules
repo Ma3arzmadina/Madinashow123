@@ -50,5 +50,10 @@ service cloud.firestore {
       allow read: if true;
       allow create, update, delete: if isValidId(userId);
     }
+
+    // Settings collection
+    match /settings/{docId} {
+      allow read, write: if true;
+    }
   }
 }
